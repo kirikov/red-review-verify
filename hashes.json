@@ -1,0 +1,50 @@
+{
+ "schema": "red-review/reference@1",
+ "note": "Every released Red Review deployment: the dstack app-compose hash (sha256 of the app-compose document whose docker_compose_file is releases/<tag>/docker-compose.market.yml) and the OS measurements of the dstack image it runs on. verify-bundle.py fails a bundle whose quote shows anything else.",
+ "releases": [
+  {
+   "tag": "v29",
+   "date": "2026-11-04",
+   "app_id": "791cf8c6bbb827432d1a181acbe76c838945dc39",
+   "compose_hash": "8b27dc275f3be4aa67ff475e8f108aef311698ac803aaede71d60ff1ea8c0784",
+   "runner_image": "ghcr.io/kirikov/red-review-runner@sha256:2d7dc0afe8fab8194aae80ad6e4f5ba0476d845cb1e100d68ea82757a6218158",
+   "dstack": {
+    "node": "v0.6.0",
+    "os": "0.5.12",
+    "os_image_hash": "8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd"
+   },
+   "os": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "027b610ab0555482f8a3868524093bdf3cdbe2539f81dfeeb886864654cb2fe3422f7fc36d4bab6fa46683aad11d1ba7",
+    "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d"
+   }
+  },
+  {
+   "tag": "v22",
+   "date": "2026-11-04",
+   "app_id": "791cf8c6bbb827432d1a181acbe76c838945dc39",
+   "compose_hash": "6a52bccfaa2de8e649b8ae319d3b5770be9f6c64d4481be16cee433eb4c9d7ad",
+   "os": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "027b610ab0555482f8a3868524093bdf3cdbe2539f81dfeeb886864654cb2fe3422f7fc36d4bab6fa46683aad11d1ba7",
+    "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d"
+   },
+   "historical": "compose hash taken from bundles delivered on this release; the compose text is in the red-review-agent history, not archived here"
+  },
+  {
+   "tag": "v16",
+   "date": "2026-11-04",
+   "app_id": "791cf8c6bbb827432d1a181acbe76c838945dc39",
+   "compose_hash": "dd1a11ad92f93bdc88130bac83f763e582262cfb75b64b655f8c5486ce900f64",
+   "os": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "027b610ab0555482f8a3868524093bdf3cdbe2539f81dfeeb886864654cb2fe3422f7fc36d4bab6fa46683aad11d1ba7",
+    "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d"
+   },
+   "historical": "compose hash taken from bundles delivered on this release; the compose text is in the red-review-agent history, not archived here"
+  }
+ ]
+}

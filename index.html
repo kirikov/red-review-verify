@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Red Review verify</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 16px;color:#1c1c1c;background:#fff}code,pre{background:#f3f3f3;border-radius:4px}pre{padding:12px;overflow-x:auto}td,th{padding:4px 8px;border-bottom:1px solid #ddd;text-align:left;font-size:14px}table{border-collapse:collapse;width:100%}@media(prefers-color-scheme:dark){body{background:#141414;color:#e8e8e8}code,pre{background:#222}td,th{border-color:#333}}</style></head>
+<body><h1>Red Review: verify a delivery</h1>
+<p>Reference for checking a Red Review evidence bundle. The source and the history of every release are in <a href="https://github.com/kirikov/red-review-verify">github.com/kirikov/red-review-verify</a>.</p>
+<pre>git clone https://github.com/kirikov/red-review-verify && cd red-review-verify
+cargo install dcap-qvl-cli
+unzip evidence.zip -d bundle
+python3 verify-bundle.py bundle --reference hashes.json</pre>
+<p>Machine-readable reference: <a href="hashes.json">hashes.json</a>. The verifier inside each bundle loads it from this page by default.</p>
+<h2>Releases</h2><table id="t"><tr><th>Tag</th><th>Date</th><th>Compose hash</th></tr></table>
+<script>fetch('hashes.json').then(r=>r.json()).then(d=>{for(const x of d.releases){const tr=document.createElement('tr');tr.innerHTML='<td>'+x.tag+'</td><td>'+x.date+'</td><td><code>'+x.compose_hash.slice(0,16)+'…</code></td>';document.getElementById('t').appendChild(tr)}})</script>
+</body></html>
