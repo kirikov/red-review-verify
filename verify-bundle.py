@@ -13,6 +13,9 @@ Checks, in order:
      The quote's mr_config_id is 0x01 || compose_hash (dstack's MrConfigId v1),
      so the Intel-signed measurement itself names the compose, not only the
      replayed event log.
+  4b. A code review's out/: out-provenance.json (written by rts outside the
+     buyer's image) must name verdict.json and findings.md as the reviewer's
+     own writes. Required for releases that list the "out-provenance" feature.
   5. attestation.json (NEAR AI) has status "verified", and every inference
      line is signature-verified.
   6. The quote's signature chain, via `dcap-qvl verify` (cargo install
@@ -30,6 +33,7 @@ import hashlib, json, os, shutil, subprocess, sys, tempfile
 REFERENCE_URL = "https://kirikov.github.io/red-review-verify/hashes.json"
 EXPECTED_COMPOSE_HASHES = set(filter(None, os.environ.get("RR_EXPECTED_COMPOSE_HASHES", "").split(",")))
 EXPECTED_OS = []
+FEATURES = {}  # compose hash -> the release's features, e.g. {"out-provenance"}
 
 
 def load_reference(where):
@@ -43,6 +47,7 @@ def load_reference(where):
     rel = doc.get("releases") or []
     EXPECTED_COMPOSE_HASHES.update(x["compose_hash"] for x in rel if x.get("compose_hash"))
     EXPECTED_OS.extend(x["os"] for x in rel if x.get("os"))
+    FEATURES.update({x["compose_hash"]: set(x.get("features") or []) for x in rel if x.get("compose_hash")})
     return len(rel)
 
 
@@ -167,9 +172,26 @@ def main():
             die("the VM's OS measurements (MRTD, RTMR0-2) are not those of a published release")
         print("ok  OS measurements (MRTD, RTMR0-2) match a published release")
 
+    # 4b. who wrote out/: the reviewer's recorded writes, not the buyer's image
+    is_review = manifest.get("kind", "review") != "redteam"
+    if is_review:
+        prov_rel = "out-provenance.json"
+        if prov_rel in manifest["files"]:
+            prov = json.load(open(os.path.join(d, prov_rel)))
+            files = prov.get("files") or {}
+            for rel in ("verdict.json", "findings.md"):
+                if f"out/{rel}" in manifest["files"] and (files.get(rel) or {}).get("source") != "reviewer":
+                    die(f"out/{rel} is not the reviewer's own write (source {(files.get(rel) or {}).get('source')})")
+            differed = prov.get("guestCopyDiffered") or []
+            print("ok  out/verdict.json and out/findings.md are the reviewer's recorded writes"
+                  + (f"; the image rewrote its copy of {len(differed)} file(s), discarded: {', '.join(differed[:8])}" if differed else ""))
+        elif "out-provenance" in FEATURES.get(logged, set()):
+            die("this release records who wrote out/, but the bundle has no out-provenance.json")
+        else:
+            print("warn: this release predates out-provenance.json; out/ is only as trustworthy as the reviewed image")
+
     # 5. NEAR AI attestation + signatures (a red-team bundle has none: its model calls went
     #    through the test broker and are not individually signed; the quote still covers the files)
-    is_review = manifest.get("kind", "review") != "redteam"
     if not os.path.exists(os.path.join(d, "attestation.json")):
         if is_review:
             die("a code-review bundle without NEAR's attestation record: the review's inference is unattested")
