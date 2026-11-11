@@ -3,6 +3,22 @@
  "note": "Every released Red Review deployment: the dstack app-compose hash (sha256 of the app-compose document whose docker_compose_file is releases/<tag>/docker-compose.market.yml) and the OS measurements of the dstack image it runs on. verify-bundle.py fails a bundle whose quote shows anything else.",
  "releases": [
   {
+   "tag": "v32",
+   "date": "2026-11-11",
+   "compose_hash": "cd5a9e50568f079cbc1d25417f983b0bb949712f9dc988006cc096399baf4389",
+   "os": {
+    "mrtd": "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
+    "rtmr0": "027b610ab0555482f8a3868524093bdf3cdbe2539f81dfeeb886864654cb2fe3422f7fc36d4bab6fa46683aad11d1ba7",
+    "rtmr1": "4ae609807c765916a31d724786ed74bcb97e168a9d937b04936aeef2015c907eba5ac352c6bcd749c246fd62ffb659ec",
+    "rtmr2": "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d"
+   },
+   "features": [
+    "out-provenance"
+   ],
+   "runner_image": "ghcr.io/kirikov/red-review-runner@sha256:5881633b28add1183819097473f42e5d6a3c6aea537f6ac5ab75cdc2d13a0e7b",
+   "app_id": "791cf8c6bbb827432d1a181acbe76c838945dc39"
+  },
+  {
    "tag": "v31",
    "date": "2026-11-05",
    "compose_hash": "6b16b5028388e8d08d7dbb05a7e63dc3705a05db54b2c609a5fd1b8146dd1e66",

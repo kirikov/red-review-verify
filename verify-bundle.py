@@ -18,6 +18,10 @@ Checks, in order:
      own writes. Required for releases that list the "out-provenance" feature.
   5. attestation.json (NEAR AI) has status "verified", and every inference
      line is signature-verified.
+  5c. intake/, when present: the model calls of the intake agent, which read the
+     brief and wrote to the buyer before the run. Each call has NEAR AI's
+     verified record and a verified signature; request.json and response.json
+     are the bytes the signature covers; the manifest lists all four files.
   6. The quote's signature chain, via `dcap-qvl verify` (cargo install
      dcap-qvl-cli; collateral from Phala's PCCS): TCB status must be UpToDate or
      SWHardeningNeeded, and the measurements it reports must equal the parsed
@@ -67,6 +71,33 @@ def replay_rtmr(digests):
     for d in digests:
         mr = hashlib.sha384(mr + bytes.fromhex(d).ljust(48, b"\0")).digest()
     return mr.hex()
+
+def check_intake(d, listed):
+    """The intake agent read the brief and wrote to the buyer before the run. Each of its model calls in
+    the bundle must carry NEAR AI's verified record and a verified signature, and request.json and
+    response.json must be the bytes that signature covers; the quoted manifest (listed) must name the files.
+    Returns the number of calls."""
+    intake = os.path.join(d, "intake")
+    calls = sorted(n for n in os.listdir(intake) if os.path.isdir(os.path.join(intake, n))) if os.path.isdir(intake) else []
+    for name in calls:
+        c = os.path.join(intake, name)
+        try:
+            rec = json.load(open(os.path.join(c, "attestation.json")))
+            signed = [json.loads(l) for l in open(os.path.join(c, "inference.jsonl")) if l.strip()]
+            sums = [sha256_file(os.path.join(c, f)) for f in ("request.json", "response.json")]
+        except (OSError, ValueError) as e:
+            die(f"intake/{name}: the record is incomplete ({e})")
+        unlisted = [f for f in ("attestation.json", "inference.jsonl", "request.json", "response.json") if f"intake/{name}/{f}" not in listed]
+        if unlisted: die(f"intake/{name}: {', '.join(unlisted)} not in the manifest, so the quote does not cover it")
+        if rec.get("status") != "verified": die(f"intake/{name}: NEAR attestation status {rec.get('status')}")
+        if len(signed) != 1 or not str(signed[0].get("result", "")).startswith("verified"):
+            die(f"intake/{name}: the completion is not signature-verified")
+        if [signed[0].get("request_sha256"), signed[0].get("response_sha256")] != sums:
+            die(f"intake/{name}: request.json or response.json is not what the model signed")
+    if calls:
+        print(f"ok  intake agent: {len(calls)} model call(s) attested and signature-verified; the requests and answers in intake/ are the signed bytes")
+    return len(calls)
+
 
 def main():
     args = sys.argv[1:]
@@ -216,6 +247,9 @@ def main():
         if ver.get("failed") or not ver.get("verified"):
             die(f"precise pass: NEAR AI verification {ver.get('status')} ({ver.get('failed')} failed, {ver.get('verified')} verified)")
         print(f"ok  precise pass (ocr scan): {ver.get('verified')} completions verified, E2EE {'on' if ver.get('e2ee') else 'off'}, {ver.get('verification_level')}")
+
+    # 5c. the intake agent's model calls, when the bundle has any
+    check_intake(d, manifest.get("files") or {})
 
     # 6. quote signature chain (Intel PCK -> QE -> quote) via dcap-qvl
     if not dcap:

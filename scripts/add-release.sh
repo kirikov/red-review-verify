@@ -6,11 +6,14 @@
 set -eu
 tag=$1; cvm=$2; compose=$3
 mkdir -p "releases/$tag"
-phala cvms attestation "$cvm" --json > /tmp/rr-att.json
-FEATURES=${FEATURES-out-provenance} python3 - "$tag" "$compose" <<'PY'
+# ATT=<file> uses a saved attestation instead (GET /api/v1/cvms/<vm uuid>/attestation): the CLI
+# resolves a CVM to its app id, which is ambiguous once a replica shares it.
+att=${ATT:-/tmp/rr-att.json}
+[ -n "${ATT:-}" ] || phala cvms attestation "$cvm" --json > "$att"
+FEATURES=${FEATURES-out-provenance} python3 - "$tag" "$compose" "$att" <<'PY'
 import hashlib, json, os, sys, datetime
-tag, compose = sys.argv[1:3]
-a = json.load(open("/tmp/rr-att.json"))
+tag, compose, att = sys.argv[1:4]
+a = json.load(open(att))
 def find(o, k):
     if isinstance(o, dict):
         if k in o: return o[k]
