@@ -1,0 +1,273 @@
+# The Red Review market agent in a dstack CVM: a long-lived controller that
+# polls its Agent Market queue and runs one attested review per hire
+# (deploy/controller/rrctl, started by run.sh when MARKET_AGENT_TOKEN is set).
+# Same runner image as the one-shot compose, pinned by digest, so the
+# attested compose hash pins the exact controller and reviewer that ran.
+# Deploy with
+#   phala deploy -n red-review-agent -c deploy/phala/docker-compose.market.yml -t tdx.medium \
+#     --no-dev-os --no-public-logs -e agent.env --wait
+# agent.env (never committed) holds MARKET_AGENT_TOKEN (the agent's aat_
+# token), NEARAI_API_KEY and RESULT_TOKEN (the operator's live view on :8080),
+# optionally MARKET_BASE_URL, MODEL, TIMEOUT_MIN, POLL_SECONDS, CPUS,
+# MEMORY_MIB, ATTEST, ATTEST_POLICY, INFERENCE, CONTEXT_LIMIT, EXTRA_BODY,
+# THINKING, REPO_HOSTS, MAX_REPO_MB, OCR, OCR_TIMEOUT_MIN, OCR_TOKEN_BUDGET,
+# OCR_E2EE, OCR_VERIFICATION, RT_PARALLEL, RT_TRIAL_TIMEOUT, RT_RED_MODEL,
+# RT_RED_FALLBACK, RT_RUNTIME (the red-team run). The egress sidecar admits the market host
+# in every phase (EGRESS_HOSTS) and the repository hosts in the build phase.
+services:
+  runner:
+    image: ghcr.io/kirikov/red-review-runner@sha256:f07ea7c3936a64af31d31230cfe58ceb58c7c908794123b40aacb60ee67021aa
+    restart: unless-stopped
+    depends_on:
+      egress:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - egress-state:/egress
+      - rr-work:/work
+    ports:
+      - "8080:8080"
+    environment:
+      - RUNNER_IMAGE=ghcr.io/kirikov/red-review-runner@sha256:f07ea7c3936a64af31d31230cfe58ceb58c7c908794123b40aacb60ee67021aa
+      - MARKET_AGENT_TOKEN=${MARKET_AGENT_TOKEN}
+      - MARKET_AGENT_TOKEN_L2=${MARKET_AGENT_TOKEN_L2:-}
+      - LISTING_HANDLE=${LISTING_HANDLE:-red-review}
+      - LISTING_HANDLE_L2=${LISTING_HANDLE_L2:-red-review-agent}
+      - MARKET_BASE_URL=${MARKET_BASE_URL:-https://market.near.ai}
+      - NEARAI_API_KEY=${NEARAI_API_KEY}
+      - RESULT_TOKEN=${RESULT_TOKEN:-}
+      # The operator runs one delivered assignment again on this version: <assignment id>[:<tag>], once per value.
+      - OPERATOR_RERUN=${OPERATOR_RERUN:-}
+      - OPERATOR_COVERAGE=${OPERATOR_COVERAGE:-}
+      - PUBLIC_LIVE_URL=${PUBLIC_LIVE_URL:-}
+      - MODEL=${MODEL:-}
+      - TIMEOUT_MIN=${TIMEOUT_MIN:-90}
+      - POLL_SECONDS=${POLL_SECONDS:-30}
+      - ETA_MINUTES=${ETA_MINUTES:-60}
+      - REPO_HOSTS=${REPO_HOSTS:-github.com}
+      - MAX_REPO_MB=${MAX_REPO_MB:-400}
+      - CPUS=${CPUS:-1}
+      - MEMORY_MIB=${MEMORY_MIB:-2048}
+      - RTS_RUNTIME=sysbox-runc
+      - ATTEST=${ATTEST:-1}
+      - ATTEST_POLICY=${ATTEST_POLICY:-mr-config-only}
+      - INFERENCE=${INFERENCE:-direct}
+      - CONTEXT_LIMIT=${CONTEXT_LIMIT:-}
+      - EXTRA_BODY=${EXTRA_BODY:-}
+      - THINKING=${THINKING:-1}
+      - BUILD_TIMEOUT_MIN=${BUILD_TIMEOUT_MIN:-45}
+      - DRAFT_BUILD_MIN=${DRAFT_BUILD_MIN:-45}
+      - START_TIMEOUT_MIN=${START_TIMEOUT_MIN:-30}
+      - TOOL_TIMEOUT_S=${TOOL_TIMEOUT_S:-300}
+      - OCR=${OCR:-1}
+      - RT_PARALLEL=${RT_PARALLEL:-3}
+      - RT_TRIAL_TIMEOUT=${RT_TRIAL_TIMEOUT:-240}
+      - RT_RED_MODEL=${RT_RED_MODEL:-deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated}
+      - RT_RED_FALLBACK=${RT_RED_FALLBACK:-Qwen/Qwen3.8-27B-abliterated}
+      - RT_RUNTIME=${RT_RUNTIME:-sysbox-runc}
+      - OCR_TIMEOUT_MIN=${OCR_TIMEOUT_MIN:-20}
+      - OCR_TOKEN_BUDGET=${OCR_TOKEN_BUDGET:-4000000}
+      - OCR_E2EE=${OCR_E2EE:-true}
+      - OCR_VERIFICATION=${OCR_VERIFICATION:-model-tee}
+      - RR=/opt/rr
+      - WORK_DIR=/work
+      - EGRESS_STATE=/egress
+  # Egress allowlist for the whole CVM (deploy/phala/egress.sh): nftables in
+  # the host namespace plus a dnsmasq that resolves only allowed domains. The
+  # controller switches it to the build phase (registries, package indexes,
+  # the repository host) before each clone and build, and review.sh back to
+  # the review phase (NEAR AI Cloud, Intel PCS, NVIDIA NRAS, the market)
+  # before the model sees the code.
+  egress:
+    image: debian@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+    network_mode: host
+    pid: host
+    cgroup: host
+    cap_add: [NET_ADMIN]
+    restart: "no"
+    volumes:
+      - egress-state:/egress
+      - /dstack/.host-shared/.sys-config.json:/dstack-sys-config.json:ro
+    environment:
+      - EGRESS_HOSTS=${EGRESS_MARKET_HOST:-market.near.ai} ${EGRESS_HOSTS:-}
+      - EGRESS_BUILD_HOSTS=${EGRESS_BUILD_HOSTS:-}
+      - EGRESS_LOG=${EGRESS_LOG:-0}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/egress/ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+    command:
+      - sh
+      - -ec
+      - |
+        rm -f /egress/ready /egress/phase   # a stale marker from the last boot must not let the runner start before the rules load
+        apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nftables dnsmasq wireguard-tools procps >/dev/null
+        # --- egress.sh (sync-egress.py) ---
+        #!/bin/sh
+        # Egress allowlist for the review CVM. Runs as the `egress` compose service:
+        # alpine in the host network namespace with NET_ADMIN, so one nftables table
+        # governs the host (dockerd pulls, the runner) through the output hook and
+        # every container through the forward hook, IPv4 and IPv6 alike (the dstack
+        # guest has a routed IPv6 default from QEMU's user network, so an IPv4-only
+        # filter leaks). Everything not allowed is rejected.
+        #
+        # Names, not addresses, are the allowlist. Every DNS query in the CVM (host
+        # and containers) is redirected to a local dnsmasq that forwards only the
+        # allowed domains to the resolver and answers NXDOMAIN for the rest; the
+        # addresses it returns go into the nft sets (dnsmasq --nftset) with a 2 h
+        # timeout, so hosts that rotate one A record per query (github.com) and CDN
+        # redirects work, and a name that is not allowed cannot even be resolved.
+        #
+        # Always allowed: loopback (where the redirected DNS lands), established flows,
+        # the resolver on udp/tcp 53 (for dnsmasq), the dstack gateway (its WireGuard
+        # endpoint and HTTPS API, read from the running tunnel and
+        # /dstack/.sys-config.json) and what arrives through its tunnel (the published
+        # result port), chronyd's NTP/NTS (by cgroup, else uid), host<->container bridges,
+        # and tcp 80/443 to the domains of the current phase:
+        #   build   CORE + inputs/bundle hosts + image registries + package indexes
+        #   review  CORE only (NEAR AI Cloud, Intel PCS, NVIDIA NRAS)
+        #   open    any public address on tcp 80/443 and any name: only while `docker build`
+        #           or `docker pull` of a buyer's image runs, because a Dockerfile may fetch
+        #           from anywhere. Private, link-local and carrier-NAT ranges stay closed.
+        # The runner switches the phase by writing it to $$EGRESS_STATE/phase; the
+        # sidecar marks $$EGRESS_STATE/ready after the first apply, which the compose
+        # healthcheck gates the runner on. EGRESS_HOSTS adds domains to every phase,
+        # EGRESS_BUILD_HOSTS to the build phase; EGRESS_LOG=1 prints the sets.
+        set -eu
+        STATE=$${EGRESS_STATE:-/egress}
+        DNSPORT=5335
+        mkdir -p "$$STATE"
+        rm -f "$$STATE/phase" "$$STATE/ready"   # a fresh boot starts in the build phase
+        CORE="cloud-api.near.ai api.trustedservices.intel.com certificates.trustedservices.intel.com nras.attestation.nvidia.com $${EGRESS_HOSTS:-}"
+        BUILD="registry-1.docker.io auth.docker.io index.docker.io production.cloudfront.docker.com production.cloudflare.docker.com docker.io
+         ghcr.io pkg-containers.githubusercontent.com github.com codeload.github.com objects.githubusercontent.com raw.githubusercontent.com release-assets.githubusercontent.com
+         pypi.org files.pythonhosted.org registry.npmjs.org registry.yarnpkg.com
+         deb.debian.org security.debian.org archive.ubuntu.com security.ubuntu.com ports.ubuntu.com dl-cdn.alpinelinux.org
+         crates.io static.crates.io index.crates.io proxy.golang.org sum.golang.org storage.googleapis.com $${EGRESS_BUILD_HOSTS:-}"
+        host_of() { printf '%s\n' "$$1" | sed -E 's#^[a-z]+://##; s#[/:?].*$$##'; }
+        for u in $${INPUT_URL:-} $${BUNDLE_URL:-}; do BUILD="$$BUILD $$(host_of "$$u")"; done
+        for u in $$(grep -oE 'https://[^"]+' /dstack-sys-config.json 2>/dev/null | grep gateway); do CORE="$$CORE $$(host_of "$$u")"; done
+        RES=$$(awk '/^nameserver/{print $$2; exit}' /etc/resolv.conf)
+        WG=$$(wg show all endpoints 2>/dev/null | awk '{print $$NF}' | grep : | sort -u || true)
+        DNSUSER=$$(id -un dnsmasq 2>/dev/null || echo nobody); DNSUID=$$(id -u "$$DNSUSER")
+
+        nft -f - <<NFT
+        table inet rr_egress
+        delete table inet rr_egress
+        table inet rr_egress {
+          set allow4 { type ipv4_addr; flags timeout; timeout 2h; }
+          set allow6 { type ipv6_addr; flags timeout; timeout 2h; }
+          set gw4 { type ipv4_addr . inet_service; }
+          chain web_open {
+          }
+          chain dns_out {
+            type nat hook output priority -100; policy accept;
+            meta skuid $$DNSUID return
+            ip daddr $$RES udp dport 53 redirect to :$$DNSPORT
+            ip daddr $$RES tcp dport 53 redirect to :$$DNSPORT
+          }
+          chain dns_pre {
+            type nat hook prerouting priority -100; policy accept;
+            udp dport 53 redirect to :$$DNSPORT
+            tcp dport 53 redirect to :$$DNSPORT
+          }
+          chain output {
+            type filter hook output priority filter - 10; policy drop;
+            oif lo accept
+            ip daddr 127.0.0.0/8 accept
+            ip6 daddr ::1 accept
+            ct state established,related accept
+            oifname "dstack-wg0" accept
+            meta l4proto icmpv6 accept
+            ip daddr $$RES udp dport 53 accept
+            ip daddr $$RES tcp dport 53 accept
+            ip daddr . udp dport @gw4 accept
+            ip daddr 172.16.0.0/12 accept
+            jump web_open
+            ip daddr @allow4 tcp dport { 80, 443 } accept
+            ip6 daddr @allow6 tcp dport { 80, 443 } accept
+            counter reject with icmpx type admin-prohibited
+          }
+          chain input {
+            type filter hook input priority filter - 10; policy accept;
+            ip saddr 172.16.0.0/12 tcp dport 8080 drop
+          }
+          chain forward {
+            type filter hook forward priority filter - 10; policy drop;
+            ct state established,related accept
+            iifname "dstack-wg0" accept
+            # No container (a buyer's image build or trial) reaches the operator's live view on :8080;
+            # the view is for the dstack gateway only.
+            ip saddr 172.16.0.0/12 tcp dport 8080 drop
+            ip saddr 172.16.0.0/12 ip daddr 172.16.0.0/12 accept
+            jump web_open
+            ip daddr @allow4 tcp dport { 80, 443 } accept
+            ip6 daddr @allow6 tcp dport { 80, 443 } accept
+            counter reject with icmpx type admin-prohibited
+          }
+        }
+        NFT
+        for ep in $$WG; do nft add element inet rr_egress gw4 "{ $${ep%:*} . $${ep##*:} }"; done
+        # dstack's chronyd (NTS: udp 123 + NTS-KE tcp 4460) keeps the clock that the
+        # attestation checks (NRAS nbf/exp, TDX collateral) depend on. It runs as root
+        # and resolved its servers at boot, before dnsmasq, so it is matched by its
+        # systemd cgroup (the service runs with the host's pid and cgroup namespaces:
+        # nft resolves the path under /sys/fs/cgroup), with its uid as the fallback.
+        CHRONY=none
+        pid=$$(pgrep -x chronyd 2>/dev/null | head -1 || true)
+        if [ -n "$$pid" ]; then
+          cg=$$(sed -n 's#^0::/##p' "/proc/$$pid/cgroup" | head -1)
+          lvl=$$(printf '%s' "$$cg" | awk -F/ '{print NF}')
+          if [ -n "$$cg" ] && nft insert rule inet rr_egress output socket cgroupv2 level "$$lvl" "\"$$cg\"" udp dport 123 accept 2>/dev/null; then
+            nft insert rule inet rr_egress output socket cgroupv2 level "$$lvl" "\"$$cg\"" tcp dport 4460 accept
+            CHRONY="cgroup $$cg"
+          else
+            uid=$$(awk '/^Uid:/{print $$2}' "/proc/$$pid/status")
+            nft insert rule inet rr_egress output meta skuid "$$uid" udp dport 123 accept
+            nft insert rule inet rr_egress output meta skuid "$$uid" tcp dport 4460 accept
+            CHRONY="uid $$uid"
+          fi
+        fi
+        echo "[egress] rules up: resolver $$RES, gateway $${WG:-none}, chrony $$CHRONY, dns on :$$DNSPORT, phase file $$STATE/phase"
+
+        dns_up() { # $$1 = domains: dnsmasq forwards only these (and fills the sets), NXDOMAIN for all else
+          {
+            echo "port=$$DNSPORT"; echo "user=$$DNSUSER"; echo "no-resolv"; echo "no-hosts"; echo "bind-dynamic"
+            echo "except-interface=eth0"; echo "except-interface=dstack-wg0"
+            if [ "$$1" = "*" ]; then
+              echo "server=$$RES"
+            else
+              echo "local=/#/"
+              for h in $$1; do echo "server=/$$h/$$RES"; echo "nftset=/$$h/4#inet#rr_egress#allow4,6#inet#rr_egress#allow6"; done
+            fi
+          } > /etc/dnsmasq.conf
+          if [ -n "$${DNSPID:-}" ]; then kill "$$DNSPID" 2>/dev/null || true; wait "$$DNSPID" 2>/dev/null || true; fi
+          dnsmasq --conf-file=/etc/dnsmasq.conf --keep-in-foreground --log-facility=- &
+          DNSPID=$$!
+          sleep 1
+        }
+        DNSPID=""
+        phase=""
+        while :; do
+          want=$$(cat "$$STATE/phase" 2>/dev/null || echo build)
+          case "$$want" in review) hosts="$$CORE" ;; open) hosts="*" ;; *) want=build; hosts="$$CORE $$BUILD" ;; esac
+          if [ "$$want" != "$$phase" ]; then
+            nft flush set inet rr_egress allow4; nft flush set inet rr_egress allow6
+            nft flush chain inet rr_egress web_open
+            if [ "$$want" = open ]; then
+              nft add rule inet rr_egress web_open ip daddr != '{ 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 }' tcp dport '{ 80, 443 }' accept
+              nft add rule inet rr_egress web_open ip6 daddr != '{ ::1, fc00::/7, fe80::/10 }' tcp dport '{ 80, 443 }' accept
+            fi
+            dns_up "$$hosts"
+            phase=$$want; [ "$$hosts" = "*" ] && echo "[egress] phase $$phase: any public host on 80/443" || echo "[egress] phase $$phase: $$(echo $$hosts | wc -w) domains"
+            touch "$$STATE/ready"
+          fi
+          [ "$${EGRESS_LOG:-0}" = 1 ] && nft list set inet rr_egress allow4 | tr -d '\n\t' | sed 's/  */ /g' | cut -c1-300
+          sleep 5
+        done
+        # --- end egress.sh ---
+volumes:
+  egress-state: {}
+  rr-work: {}
